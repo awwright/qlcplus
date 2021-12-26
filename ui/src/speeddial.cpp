@@ -551,9 +551,47 @@ void SpeedDial::slotTapClicked()
     }
     // Round the elapsed time to the nearest full 10th ms.
     m_value = m_tapTime->elapsed();
-    setSpinValues(m_value);
-
     m_tapTime->restart();
+
+    // If there's recently been multiple beats input, find the best fitting tempo.
+    if(m_value > 1500){
+        // TODO: shift the tempo slightly upward or downward and re-phase the tempo
+        m_tapHistory.clear();
+        // TODO: If m_value is above the widget's maximum, then ignore this tap altogether
+        setSpinValues(m_value);
+        return;
+    }
+
+    m_tapHistory.append(m_value);
+    // This algorithm stabilizes around a tempo very quickly,
+    // so keeping than a few beats in the history merely complicates tempo changes
+    while(m_tapHistory.count() > 20) m_tapHistory.removeFirst();
+
+    // Find the median time between taps, assume that the tempo is +-40% of this
+    QList<int> sortedTimes = QList(m_tapHistory);
+    std::sort(sortedTimes.begin(), sortedTimes.end());
+    int median_time = sortedTimes[sortedTimes.length()/2];
+
+    // Compute a linear regression to determine the best-fitting slope of the points.
+    // This is not as easy as averaging together the durations,
+    // which causes all but the first and last taps to cancel each other out.
+    // Initialize the data with the first tap at (0, 0).
+    // Use a float, otherwise (n * sum_xy) will overflow very quickly.
+    double x = 0, y = 0, n = 1, sum_x = 0, sum_y = 0, sum_xx = 0, sum_xy = 0;
+    foreach (int interval_ms, m_tapHistory)
+    {
+        n += 1;
+        // Divide by median_time to determine if a beat was skipped during input
+        x += (median_time/2 + interval_ms) / median_time;
+        y += interval_ms;
+        sum_x += x;
+        sum_y += y;
+        sum_xx += x * x;
+        sum_xy += x * y;
+    }
+    int slope = (n * sum_xy - sum_x * sum_y) / (n * sum_xx - sum_x * sum_x);
+
+    setSpinValues(slope);
 
     // time has changed - update tap button blinking
     updateTapTimer();
